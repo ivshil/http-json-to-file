@@ -59,16 +59,16 @@ func bufferWriterOOD(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to read request body", http.StatusBadRequest)
 		return
 	}
-
-	bufferMutex.Lock()
-	bufferedData = append(bufferedData, string(body))
-	bufferSize := calculateBufferSize()
-	bufferMutex.Unlock()
 	fileName, err := getFileName(r.URL.Path)
 	if err != nil {
 		http.Error(w, "Bad Path!", http.StatusPartialContent)
 		return
 	}
+
+	bufferMutex.Lock()
+	bufferedData = append(bufferedData, string(body))
+	bufferSize := calculateBufferSize()
+	bufferMutex.Unlock()
 	if bufferSize >= maxBufferSize {
 		go writeToFile(fileName)
 	}
@@ -79,6 +79,8 @@ func getFileName(path string) (string, error) {
 	// Get the filename for the bufferedData, return error if anything is incorrect
 	if len(path) < len(specPath) {
 		return defaultFileName, nil
+	} else if path[0:len(specPath)] != specPath {
+		return defaultFileName, nil
 	} else if path[0:len(specPath)] == specPath && isProperReqPath(path[len(specPath):]) {
 		return path[len(specPath):], nil
 	} else {
@@ -87,6 +89,9 @@ func getFileName(path string) (string, error) {
 }
 
 func isProperReqPath(str string) bool {
+	if str == "" {
+		return false
+	}
 	regex := regexp.MustCompile("^[a-zA-Z][a-zA-Z0-9]*$")
 	return regex.MatchString(str)
 }
@@ -100,7 +105,6 @@ func calculateBufferSize() int {
 }
 
 func writeToFile(fileName string) error {
-
 	currentDir, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("failed to get current directory: %v", err)
@@ -108,16 +112,23 @@ func writeToFile(fileName string) error {
 
 	filePath := filepath.Join(currentDir, "data", fileName)
 
-	// Write data to the file
-	data := []byte("")
-	for _, item := range bufferedData {
-		data = append(data, []byte(item+"\n")...)
+	existingData, err := ioutil.ReadFile(filePath)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to read data from file %s: %v", filePath, err)
 	}
-	err = ioutil.WriteFile(filePath, data, 0644)
+
+	for _, item := range bufferedData {
+		existingData = append(existingData, []byte(item+"\n")...)
+	}
+
+	err = ioutil.WriteFile(filePath, existingData, 0644)
 	if err != nil {
 		return fmt.Errorf("failed to write data to file %s: %v", filePath, err)
 	}
 
 	log.Printf("Data written to file: %s", filePath)
+
+	bufferedData = nil
+
 	return nil
 }
